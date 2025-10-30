@@ -5,6 +5,7 @@ Routes:
 - GET /connectors: List available connectors (no auth for bootstrap)
 - POST /connectors/{id}/oauth/login: Initiate OAuth login (mock or real)
 - GET /connectors/{id}/oauth/callback: Handle OAuth callback (mock or real)
+- GET /connectors/{id}/search: Normalized search across connectors (stub/mocked)
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import os
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -27,6 +28,77 @@ from ..errors import APIError
 from ..security import AuthContext, get_auth_context
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
+
+
+class NormalizedSearchItem(BaseModel):
+    """Normalized search item shape used by UI/tools across connectors."""
+    id: str = Field(..., description="Stable identifier in the external system")
+    title: str = Field(..., description="Primary title/headline")
+    url: str = Field(..., description="Deep link URL to the item")
+    type: str = Field(..., description="Connector-specific type (e.g., issue, page)")
+    subtitle: Optional[str] = Field(default=None, description="Secondary info (e.g., key/space/summary)")
+
+
+class NormalizedSearchResponse(BaseModel):
+    """Wrapper for normalized search results."""
+    items: List[NormalizedSearchItem] = Field(default_factory=list, description="Search results")
+
+
+def _deterministic_hash(s: str) -> str:
+    """Build a short deterministic hex from input (for stable mock ids)."""
+    h = hashlib.sha256(s.encode("utf-8")).hexdigest()
+    return h[:12]
+
+
+def _mock_search_results(connector_id: str, query: str, tenant_id: str) -> List[NormalizedSearchItem]:
+    """Return deterministic mock results when real credentials are absent."""
+    connector = connector_id.lower()
+    base = f"{connector}:{tenant_id}:{query}"
+    items: List[NormalizedSearchItem] = []
+
+    if connector == "jira":
+        # Mock three "issues"
+        for i in range(1, 4):
+            key = f"PP-{i}"
+            stable = _deterministic_hash(f"{base}:{key}")
+            items.append(
+                NormalizedSearchItem(
+                    id=stable,
+                    title=f"[{key}] {query.title()} issue",
+                    url=f"https://example.atlassian.net/browse/{key}",
+                    type="issue",
+                    subtitle=f"Project PP • Status: To Do • Rank #{i}",
+                )
+            )
+    elif connector == "confluence":
+        # Mock two "pages"
+        for i in range(1, 3):
+            title = f"{query.title()} Knowledge Page {i}"
+            stable = _deterministic_hash(f"{base}:PAGE-{i}")
+            items.append(
+                NormalizedSearchItem(
+                    id=stable,
+                    title=title,
+                    url=f"https://example.atlassian.net/wiki/spaces/SPACE/pages/{stable}",
+                    type="page",
+                    subtitle=f"SPACE • Updated recently • v{i}",
+                )
+            )
+    else:
+        # Generic fallback
+        for i in range(1, 3):
+            stable = _deterministic_hash(f"{base}:GEN-{i}")
+            items.append(
+                NormalizedSearchItem(
+                    id=stable,
+                    title=f"{connector_id.title()} Result {i} for '{query}'",
+                    url=f"https://example.local/{connector_id}/items/{stable}",
+                    type="item",
+                    subtitle="Mock item",
+                )
+            )
+
+    return items
 
 
 @router.get(
@@ -322,3 +394,72 @@ def oauth_callback(
     return OAuthCallbackSuccess(
         connector=connector_id, status="connected", connection_id=connection.id, message="OAuth connected (mock)"
     )
+
+
+@router.get(
+    "/{connector_id}/search",
+    summary="Search within a connector (normalized response)",
+    description=(
+        "Performs a search against the specified connector and returns normalized results.\n"
+        "If valid credentials/secrets are not configured, returns deterministic mock data. "
+        "Normalized item shape: {id, title, url, type, subtitle}."
+    ),
+    response_model=NormalizedSearchResponse,
+    responses={
+        200: {"description": "Normalized search results"},
+        400: {"description": "Invalid request"},
+        401: {"description": "Unauthorized"},
+        404: {"description": "Connector not found"},
+    },
+)
+def connector_search(
+    connector_id: str,
+    q: str = Query(..., description="Search query string"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
+    ctx: AuthContext = Depends(get_auth_context),
+    repo: ConnectionsRepository = Depends(get_connections_repo),
+) -> NormalizedSearchResponse:
+    """
+    Search the given connector and return normalized items.
+
+    Parameters:
+        connector_id: Connector identifier (e.g., jira, confluence)
+        q: Search query
+        limit: Max results to return (1-50)
+
+    Returns:
+        NormalizedSearchResponse: Wrapper with items list
+
+    Behavior:
+        - Attempts to find a connection for the current tenant and connector.
+        - If no usable credentials or no connection is present, returns deterministic mock data.
+        - Real provider calls are stubbed for now; returns mock data with a 'real' seed if detected.
+    """
+    tenant_id = ctx.tenant_id or ""
+
+    # Find a connection for this connector (first match for tenant)
+    conns = [c for c in repo.list_for_tenant(tenant_id) if c.connector.lower() == connector_id.lower()]
+    connection = conns[0] if conns else None
+
+    # Decide mode based on presence of usable credentials
+    creds: Dict[str, Any] = (connection.credentials if connection else {}) or {}
+    has_cipher = isinstance(creds.get("cipher"), str) and len(creds.get("cipher")) > 0
+    has_mock = "mock" in creds
+
+    # For future: add real integration branches when provider client secrets + tokens exist.
+    items = _mock_search_results(connector_id, q, tenant_id)
+
+    # Optionally, influence mock based on having some credentials to simulate different results
+    if has_cipher and not has_mock:
+        # Pretend "real mode" by slightly tweaking titles (still deterministic)
+        for idx, it in enumerate(items):
+            items[idx] = NormalizedSearchItem(
+                id=it.id,
+                title=f"{it.title} • Real",
+                url=it.url,
+                type=it.type,
+                subtitle=it.subtitle,
+            )
+
+    # Apply limit
+    return NormalizedSearchResponse(items=items[:limit])

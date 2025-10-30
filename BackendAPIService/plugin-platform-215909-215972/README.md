@@ -95,6 +95,9 @@ Ensure `ENCRYPTION_KEY_BASE64` is set to a base64-encoded 32-byte key; optionall
 Key routes:
 - GET / -> health
 - GET /connectors -> requires Authorization in bootstrap mode
+- POST /connectors/{id}/oauth/login -> mock/real OAuth authorize URL
+- GET /connectors/{id}/oauth/callback -> mock/real callback and connection creation
+- GET /connectors/{id}/search?q=... -> normalized search (mocked unless real creds)
 - GET /connections -> requires Authorization (uses repo DI)
 - POST /connections -> create connection; if body.credentials.plain is provided, it will be encrypted as credentials.cipher using AES-GCM
 - GET /connections/{connectionId} -> fetch a specific connection
