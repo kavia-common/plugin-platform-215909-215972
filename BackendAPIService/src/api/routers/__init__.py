@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 
 from ..errors import APIError
 from ..security import AuthContext, get_auth_context
+from .connectors import router as connectors_router_v1
 
 # Tags used in OpenAPI
 TAGS = [
@@ -37,22 +38,8 @@ def health_check() -> Dict[str, str]:
 
 
 # Placeholder routers for future expansion
-connectors_router = APIRouter(prefix="/connectors", tags=["connectors"])
 connections_router = APIRouter(prefix="/connections", tags=["connections"])
 tools_router = APIRouter(prefix="/tools", tags=["tools"])
-
-
-@connectors_router.get(
-    "",
-    summary="List all available connectors",
-    description="Returns a list of connector definitions that can be used to create connections.",
-    responses={200: {"description": "A list of connectors"}},
-)
-def list_connectors(_: AuthContext = Depends(get_auth_context)):
-    """List known connectors (stub)."""
-    # In the future, fetch from connector registry
-    return [{"name": "jira", "description": "Jira Software connector", "status": "beta"},
-            {"name": "confluence", "description": "Confluence connector", "status": "beta"}]
 
 
 @connections_router.get(
@@ -86,7 +73,7 @@ def get_api_router() -> APIRouter:
     """Return the root API router with all sub-routers mounted."""
     router = APIRouter()
     router.include_router(health_router)
-    router.include_router(connectors_router)
+    router.include_router(connectors_router_v1)
     router.include_router(connections_router)
     router.include_router(tools_router)
     return router
