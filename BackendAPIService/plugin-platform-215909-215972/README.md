@@ -53,6 +53,15 @@ BACKEND_SECURITY__JWKS_URL=
 # Database (placeholders)
 BACKEND_MONGO_URL=
 BACKEND_MONGO_DB=
+
+# Crypto (AES-256-GCM). Required for encrypt/decrypt helpers in src/api/crypto.py
+# 32-byte key base64-encoded. Example only; generate your own securely:
+# python - <<'PY'
+# import os, base64; print(base64.b64encode(os.urandom(32)).decode())
+# PY
+ENCRYPTION_KEY_BASE64=
+# Optional key id to support rotation
+ENCRYPTION_KEY_ID=
 ```
 
 Note: Nested envs use the `BACKEND_` prefix and `__` delimiter (pydantic-settings).
