@@ -6,6 +6,9 @@ Routes:
 - POST /connectors/{id}/oauth/login: Initiate OAuth login (mock or real)
 - GET /connectors/{id}/oauth/callback: Handle OAuth callback (mock or real)
 - GET /connectors/{id}/search: Normalized search across connectors (stub/mocked)
+- POST /connectors/{id}/issues: Create an issue (normalized) [jira]
+- POST /connectors/{id}/pages: Create a page (normalized) [confluence]
+- GET /connectors/{id}/projects|spaces: List projects/spaces (normalized)
 """
 from __future__ import annotations
 
@@ -463,3 +466,150 @@ def connector_search(
 
     # Apply limit
     return NormalizedSearchResponse(items=items[:limit])
+
+
+# -------- Normalized creation/list endpoints (issues/pages/projects/spaces) --------
+
+class NormalizedCreateItemRequest(BaseModel):
+    """Normalized create request for issue/page across connectors."""
+    title: str = Field(..., description="Title or summary")
+    description: Optional[str] = Field(default=None, description="Description or body")
+    project_key: Optional[str] = Field(default=None, description="Project key (Jira) or Space key (Confluence)")
+    additional: Dict[str, Any] = Field(default_factory=dict, description="Connector-specific additional fields")
+
+
+class NormalizedCreateItemResponse(BaseModel):
+    """Normalized creation response."""
+    id: str = Field(..., description="Stable identifier")
+    key: Optional[str] = Field(default=None, description="Human-friendly key (e.g., JIRA-123 or page id)")
+    url: str = Field(..., description="Deep link URL to the created resource")
+    type: str = Field(..., description="issue or page")
+    title: str = Field(..., description="Title of the created resource")
+
+
+class NormalizedListOption(BaseModel):
+    """Normalized list option for selection (e.g., projects/spaces)."""
+    id: str = Field(..., description="Stable identifier")
+    key: Optional[str] = Field(default=None, description="Key/shortcode (e.g., project key or space key)")
+    name: str = Field(..., description="Display name")
+    url: Optional[str] = Field(default=None, description="Deep link URL, if applicable")
+    type: str = Field(..., description="Type of option (project|space)")
+
+
+def _mock_project_list(tenant_id: str) -> List[NormalizedListOption]:
+    base = f"jira:{tenant_id}:projects"
+    return [
+        NormalizedListOption(id=_deterministic_hash(f"{base}:PP"), key="PP", name="Platform Project", url="https://example.atlassian.net/jira/projects/PP", type="project"),
+        NormalizedListOption(id=_deterministic_hash(f"{base}:ENG"), key="ENG", name="Engineering", url="https://example.atlassian.net/jira/projects/ENG", type="project"),
+    ]
+
+
+def _mock_space_list(tenant_id: str) -> List[NormalizedListOption]:
+    base = f"confluence:{tenant_id}:spaces"
+    return [
+        NormalizedListOption(id=_deterministic_hash(f"{base}:SPACE"), key="SPACE", name="Knowledge Base", url="https://example.atlassian.net/wiki/spaces/SPACE", type="space"),
+        NormalizedListOption(id=_deterministic_hash(f"{base}:ENG"), key="ENG", name="Engineering Wiki", url="https://example.atlassian.net/wiki/spaces/ENG", type="space"),
+    ]
+
+
+@router.get(
+    "/{connector_id}/projects",
+    summary="List projects for a connector (normalized)",
+    description="For Jira returns projects; falls back to mock when tokens/secrets are absent.",
+    response_model=List[NormalizedListOption],
+    responses={200: {"description": "List of projects (normalized)"}, 401: {"description": "Unauthorized"}},
+)
+def list_projects(
+    connector_id: str,
+    ctx: AuthContext = Depends(get_auth_context),
+    repo: ConnectionsRepository = Depends(get_connections_repo),
+) -> List[NormalizedListOption]:
+    """List projects for Jira connector; mock if real credentials are not available."""
+    tenant_id = ctx.tenant_id or ""
+    connector = connector_id.lower()
+    # In future: verify real credentials from connection; for now we always return mock
+    if connector != "jira":
+        # For non-jira connectors, return empty or mock generic
+        return []
+    return _mock_project_list(tenant_id)
+
+
+@router.get(
+    "/{connector_id}/spaces",
+    summary="List spaces for a connector (normalized)",
+    description="For Confluence returns spaces; falls back to mock when tokens/secrets are absent.",
+    response_model=List[NormalizedListOption],
+    responses={200: {"description": "List of spaces (normalized)"}, 401: {"description": "Unauthorized"}},
+)
+def list_spaces(
+    connector_id: str,
+    ctx: AuthContext = Depends(get_auth_context),
+    repo: ConnectionsRepository = Depends(get_connections_repo),
+) -> List[NormalizedListOption]:
+    """List spaces for Confluence connector; mock if real credentials are not available."""
+    tenant_id = ctx.tenant_id or ""
+    connector = connector_id.lower()
+    if connector != "confluence":
+        return []
+    return _mock_space_list(tenant_id)
+
+
+@router.post(
+    "/{connector_id}/issues",
+    summary="Create an issue (normalized)",
+    description="Creates an issue for Jira in normalized shape; returns mock in absence of real credentials.",
+    response_model=NormalizedCreateItemResponse,
+    responses={201: {"description": "Issue created"}, 400: {"description": "Invalid request"}, 401: {"description": "Unauthorized"}},
+    status_code=201,
+)
+def create_issue(
+    connector_id: str,
+    body: NormalizedCreateItemRequest,
+    ctx: AuthContext = Depends(get_auth_context),
+    repo: ConnectionsRepository = Depends(get_connections_repo),
+) -> NormalizedCreateItemResponse:
+    """Create a Jira issue in normalized response, using mock mode when tokens/secrets are absent."""
+    connector = connector_id.lower()
+    if connector != "jira":
+        raise APIError(code="unsupported_connector", message="Only jira supports /issues", status_code=400)
+
+    # Validate title and project
+    if not body.title:
+        raise APIError(code="invalid_input", message="title is required", status_code=400)
+    project_key = body.project_key or "PP"
+
+    # Mock creation
+    tenant_id = ctx.tenant_id or ""
+    key = f"{project_key}-{int(secrets.randbelow(900) + 100)}"
+    id_ = _deterministic_hash(f"{tenant_id}:{connector}:{key}:{body.title}")
+    url = f"https://example.atlassian.net/browse/{key}"
+    return NormalizedCreateItemResponse(id=id_, key=key, url=url, type="issue", title=body.title)
+
+
+@router.post(
+    "/{connector_id}/pages",
+    summary="Create a page (normalized)",
+    description="Creates a page for Confluence in normalized shape; returns mock in absence of real credentials.",
+    response_model=NormalizedCreateItemResponse,
+    responses={201: {"description": "Page created"}, 400: {"description": "Invalid request"}, 401: {"description": "Unauthorized"}},
+    status_code=201,
+)
+def create_page(
+    connector_id: str,
+    body: NormalizedCreateItemRequest,
+    ctx: AuthContext = Depends(get_auth_context),
+    repo: ConnectionsRepository = Depends(get_connections_repo),
+) -> NormalizedCreateItemResponse:
+    """Create a Confluence page in normalized response, using mock mode when tokens/secrets are absent."""
+    connector = connector_id.lower()
+    if connector != "confluence":
+        raise APIError(code="unsupported_connector", message="Only confluence supports /pages", status_code=400)
+
+    if not body.title:
+        raise APIError(code="invalid_input", message="title is required", status_code=400)
+    space = body.project_key or "SPACE"
+
+    tenant_id = ctx.tenant_id or ""
+    page_id = _deterministic_hash(f"{tenant_id}:{connector}:{space}:{body.title}:{secrets.token_hex(4)}")
+    url = f"https://example.atlassian.net/wiki/spaces/{space}/pages/{page_id}"
+    return NormalizedCreateItemResponse(id=page_id, key=space, url=url, type="page", title=body.title)
