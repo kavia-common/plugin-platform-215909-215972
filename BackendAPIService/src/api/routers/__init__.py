@@ -6,11 +6,13 @@ future domain routers (connectors, connections, tools).
 """
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
 
 from fastapi import APIRouter, Depends
 
 from ..errors import APIError
+from ..models import Connection, ConnectionListResponse
+from ..db import get_connections_repo, ConnectionsRepository
 from ..security import AuthContext, get_auth_context
 from .connectors import router as connectors_router_v1
 
@@ -46,12 +48,16 @@ tools_router = APIRouter(prefix="/tools", tags=["tools"])
     "",
     summary="List connections for a tenant",
     description="Returns all connections for the authenticated tenant.",
+    response_model=ConnectionListResponse,
     responses={200: {"description": "A list of connections"}},
 )
-def list_connections(ctx: AuthContext = Depends(get_auth_context)):
-    """List connections for current tenant (stub)."""
-    # In the future, query persistence by ctx.tenant_id
-    return [{"id": "conn-1", "connector": "jira", "tenantId": ctx.tenant_id, "status": "connected"}]
+def list_connections(
+    ctx: AuthContext = Depends(get_auth_context),
+    repo: ConnectionsRepository = Depends(get_connections_repo),
+) -> ConnectionListResponse:
+    """List connections for current tenant using the repository dependency."""
+    items: List[Connection] = repo.list_for_tenant(ctx.tenant_id or "")
+    return ConnectionListResponse(items=items)
 
 
 @tools_router.post(
