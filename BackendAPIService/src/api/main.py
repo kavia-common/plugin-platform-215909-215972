@@ -37,6 +37,7 @@ app = FastAPI(
 )
 
 # CORS
+# Configure allowed origins via BACKEND_CORS__ALLOW_ORIGINS (.env).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors.allow_origins,

@@ -1,5 +1,14 @@
 # plugin-platform-215909-215972
 
+Implementation progress:
+- 05.02 Normalized search endpoints: COMPLETE
+- 05.03 Normalized create endpoints (issues/pages): COMPLETE
+- 06.01 OAuth login stub with PKCE support: COMPLETE
+- 06.02 OAuth callback handling and encrypted storage (mock/real): COMPLETE
+
+Next:
+- 07.01 Ensure .env examples and CORS are configured across containers: COMPLETED in this change.
+
 This project contains multiple containers. This README highlights BackendAPIService bootstrap status and how to run it locally.
 
 ## BackendAPIService
@@ -16,8 +25,9 @@ FastAPI backend scaffolded with:
 ### Ports
 
 - Default: 8000 (configurable via process manager or deployment tooling)
+- Recommended local env variable: BACKEND_PORT=3001 (Step 07.01)
 - Examples:
-  - API root (health): http://localhost:8000/
+  - API root (health): http://localhost:8000/ (or http://localhost:${BACKEND_PORT}/ when using a process manager)
   - Docs (Swagger UI): http://localhost:8000/docs
   - OpenAPI JSON: http://localhost:8000/openapi.json
 
@@ -55,22 +65,28 @@ FastAPI backend scaffolded with:
 These should be set via .env (do not commit secrets). Example:
 
 ```
+# Service
+BACKEND_PORT=3001
+
 # Logging
 BACKEND_LOGGING__LEVEL=INFO
 BACKEND_LOGGING__JSON=true
 BACKEND_LOGGING__SERVICE_NAME=backend-api
 
 # CORS
-BACKEND_CORS__ALLOW_ORIGINS=*
+# Comma-separated allowed origins for CORS
+BACKEND_CORS__ALLOW_ORIGINS=http://localhost:3000
 
 # Security (bootstrap/dev) - use dev token locally, disable in production
 BACKEND_SECURITY__DEV_MODE=true
 BACKEND_SECURITY__DEV_JWT=dev-token
 
 # JWT verification settings (for production hardening)
+# When using asymmetric JWTs, set JWKS URL alongside ISSUER/AUDIENCE
 BACKEND_SECURITY__JWT_AUDIENCE=
 BACKEND_SECURITY__JWT_ISSUER=
 BACKEND_SECURITY__JWKS_URL=
+# Alternatively, if using symmetric JWTs, configure your gateway to validate before requests reach this service.
 
 # Database (placeholders for future persistence)
 BACKEND_MONGO_URL=
@@ -85,6 +101,12 @@ ENCRYPTION_KEY_BASE64=
 # Optional key id to support rotation; included in ciphertext envelope as "kid"
 ENCRYPTION_KEY_ID=
 ```
+
+Step status:
+- 05.02 Normalized search endpoints: COMPLETE
+- 05.03 Normalized create endpoints (issues/pages): COMPLETE
+- 06.01 OAuth login stub with PKCE support: COMPLETE
+- 06.02 OAuth callback handling and encrypted storage (mock/real): COMPLETE
 
 Notes:
 - Nested envs use the `BACKEND_` prefix and `__` delimiter (pydantic-settings).
