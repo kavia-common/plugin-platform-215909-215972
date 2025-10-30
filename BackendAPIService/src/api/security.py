@@ -31,13 +31,17 @@ def _parse_bearer(token: Optional[str]) -> Optional[str]:
 
 
 # PUBLIC_INTERFACE
-def get_auth_context(authorization: Optional[str] = Header(default=None)) -> AuthContext:
+def get_auth_context(
+    authorization: Optional[str] = Header(default=None),
+    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-ID"),
+) -> AuthContext:
     """
     Dependency that validates Authorization bearer token and returns AuthContext.
 
     Bootstrap behavior:
     - If BACKEND_SECURITY__DEV_MODE is True and token equals BACKEND_SECURITY__DEV_JWT,
-      accept it and mint a default AuthContext.
+      accept it and mint a default AuthContext. If X-Tenant-ID header is provided,
+      it overrides the default tenant id for scoping (useful for multi-tenant dev/testing).
     - Otherwise, raise 401 (real validation to be implemented later).
     """
     settings = get_settings()
@@ -46,8 +50,9 @@ def get_auth_context(authorization: Optional[str] = Header(default=None)) -> Aut
     if settings.security.dev_mode:
         dev_token = settings.security.dev_jwt
         if token and dev_token and token == dev_token:
-            # In dev mode, accept the token and return a stub context
-            return AuthContext(subject="dev-user", tenant_id="dev-tenant", scopes=["*"])
+            # In dev mode, accept the token and return a stub context with optional tenant override
+            tenant = x_tenant_id or "dev-tenant"
+            return AuthContext(subject="dev-user", tenant_id=tenant, scopes=["*"])
 
     # Placeholder for future JWT validation (JWKS verify, claims checks)
     raise HTTPException(

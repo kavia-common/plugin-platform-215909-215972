@@ -38,9 +38,14 @@ app = FastAPI(
 
 # CORS
 # Configure allowed origins via BACKEND_CORS__ALLOW_ORIGINS (.env).
+# For local dev, default to Next.js dev origin if config is wildcard or empty.
+origins = settings.cors.allow_origins or []
+if not origins or origins == ["*"]:
+    origins = ["http://localhost:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors.allow_origins,
+    allow_origins=origins,
     allow_credentials=settings.cors.allow_credentials,
     allow_methods=settings.cors.allow_methods,
     allow_headers=settings.cors.allow_headers,

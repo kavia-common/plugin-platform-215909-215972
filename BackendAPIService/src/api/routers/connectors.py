@@ -111,8 +111,11 @@ def _mock_search_results(connector_id: str, query: str, tenant_id: str) -> List[
     response_model=List[ConnectorMetadata],
     responses={200: {"description": "A list of connectors"}},
 )
-def list_connectors() -> List[ConnectorMetadata]:
+def list_connectors(
+    ctx: AuthContext = Depends(get_auth_context),  # enforce auth per OpenAPI security
+) -> List[ConnectorMetadata]:
     """Return static connector metadata for discovery (Jira and Confluence)."""
+    _ = ctx  # unused but enforces dependency
     return registry_list()
 
 
