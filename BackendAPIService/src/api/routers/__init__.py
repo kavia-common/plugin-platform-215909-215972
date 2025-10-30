@@ -1,0 +1,92 @@
+"""
+Base routers for the Backend API Service.
+
+This module defines the root API router, a health router, and placeholders for
+future domain routers (connectors, connections, tools).
+"""
+from __future__ import annotations
+
+from typing import Dict
+
+from fastapi import APIRouter, Depends
+
+from ..errors import APIError
+from ..security import AuthContext, get_auth_context
+
+# Tags used in OpenAPI
+TAGS = [
+    {"name": "health", "description": "Service health and readiness probes"},
+    {"name": "connectors", "description": "Manage available connectors"},
+    {"name": "connections", "description": "Tenant-scoped connections to external tools"},
+    {"name": "tools", "description": "LLM tools integration endpoints"},
+]
+
+
+health_router = APIRouter(prefix="", tags=["health"])
+
+
+@health_router.get(
+    "/",
+    summary="Health Check",
+    description="Basic health check to verify the service is running.",
+    response_model=dict,
+)
+def health_check() -> Dict[str, str]:
+    """Return service health status."""
+    return {"message": "Healthy"}
+
+
+# Placeholder routers for future expansion
+connectors_router = APIRouter(prefix="/connectors", tags=["connectors"])
+connections_router = APIRouter(prefix="/connections", tags=["connections"])
+tools_router = APIRouter(prefix="/tools", tags=["tools"])
+
+
+@connectors_router.get(
+    "",
+    summary="List all available connectors",
+    description="Returns a list of connector definitions that can be used to create connections.",
+    responses={200: {"description": "A list of connectors"}},
+)
+def list_connectors(_: AuthContext = Depends(get_auth_context)):
+    """List known connectors (stub)."""
+    # In the future, fetch from connector registry
+    return [{"name": "jira", "description": "Jira Software connector", "status": "beta"},
+            {"name": "confluence", "description": "Confluence connector", "status": "beta"}]
+
+
+@connections_router.get(
+    "",
+    summary="List connections for a tenant",
+    description="Returns all connections for the authenticated tenant.",
+    responses={200: {"description": "A list of connections"}},
+)
+def list_connections(ctx: AuthContext = Depends(get_auth_context)):
+    """List connections for current tenant (stub)."""
+    # In the future, query persistence by ctx.tenant_id
+    return [{"id": "conn-1", "connector": "jira", "tenantId": ctx.tenant_id, "status": "connected"}]
+
+
+@tools_router.post(
+    "/{toolName}/actions",
+    summary="Invoke an action on a connector tool",
+    description="Invoke an action on a tool for LLM agent integration (stub).",
+    responses={200: {"description": "Action result"}},
+)
+def invoke_tool_action(toolName: str, ctx: AuthContext = Depends(get_auth_context)):
+    """Invoke a tool action (stub) returns a placeholder result."""
+    # Future: dispatch to registered tool implementation
+    if not toolName:
+        raise APIError(code="invalid_tool", message="Tool name is required", status_code=400)
+    return {"tool": toolName, "tenantId": ctx.tenant_id, "result": "ok"}
+
+
+# PUBLIC_INTERFACE
+def get_api_router() -> APIRouter:
+    """Return the root API router with all sub-routers mounted."""
+    router = APIRouter()
+    router.include_router(health_router)
+    router.include_router(connectors_router)
+    router.include_router(connections_router)
+    router.include_router(tools_router)
+    return router
