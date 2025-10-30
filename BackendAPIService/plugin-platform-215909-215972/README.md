@@ -96,6 +96,9 @@ Key routes:
 - GET / -> health
 - GET /connectors -> requires Authorization in bootstrap mode
 - GET /connections -> requires Authorization (uses repo DI)
+- POST /connections -> create connection; if body.credentials.plain is provided, it will be encrypted as credentials.cipher using AES-GCM
+- GET /connections/{connectionId} -> fetch a specific connection
+- DELETE /connections/{connectionId} -> delete connection
 - POST /tools/{toolName}/actions -> requires Authorization
 
 ### Hardening todo
