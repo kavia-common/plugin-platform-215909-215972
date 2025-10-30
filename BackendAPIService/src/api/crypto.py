@@ -1,26 +1,26 @@
 """
 Cryptography utilities for encrypting and decrypting sensitive data at rest.
 
-Provides AES-256-GCM based helpers that use a base64-encoded key sourced from
-environment variables. This module is intentionally small and stateless to make
-testing and migration to KMS/HSM straightforward later.
+Provides AES-256-GCM helpers that use a base64-encoded key from environment
+variables. The helpers return/accept a JSON envelope containing the ciphertext
+and metadata, including an optional key ID for rotation.
 
 Environment variables (configured by orchestrator via .env):
 - ENCRYPTION_KEY_BASE64: Base64-encoded 32-byte (256-bit) key used for AES-GCM
 - ENCRYPTION_KEY_ID: Optional identifier for the active key (for rotation support)
 
-The ciphertext envelope is JSON with the following fields:
+Cipher envelope JSON fields:
 {
   "kid": "key-id-or-null",
   "alg": "AES-256-GCM",
-  "nonce": "base64",
-  "ciphertext": "base64"  # includes the GCM tag appended to the end
+  "nonce": "base64",       // 12-byte random nonce
+  "ciphertext": "base64"   // includes the GCM tag appended
 }
 
 Security notes:
-- AES-GCM requires a unique nonce (IV) per encryption under the same key.
-  This module generates a random 12-byte nonce per call.
-- Associated data (AAD) can be added later if we need integrity bound metadata.
+- AES-GCM requires a unique nonce per encryption under the same key. We generate
+  a random 12-byte nonce per call.
+- AAD is not used yet; we can add it when binding integrity to metadata is needed.
 """
 from __future__ import annotations
 
@@ -33,14 +33,9 @@ from typing import Any, Dict, Optional, Union
 from pydantic import BaseModel, Field, ValidationError
 
 try:
-    # We use the widely adopted 'cryptography' package for AES-GCM primitives.
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # type: ignore
 except Exception:  # pragma: no cover
-    # Defer import errors to runtime so that services which don't exercise crypto
-    # aren't blocked during bootstrap tasks. Routes using crypto should clearly
-    # surface a helpful error if the package is unavailable.
     AESGCM = None  # type: ignore
-
 
 ALG = "AES-256-GCM"
 
@@ -64,7 +59,9 @@ def _load_context_from_env() -> CryptoContext:
     """Load AES key and optional key_id from environment variables."""
     key_b64 = os.getenv("ENCRYPTION_KEY_BASE64")
     if not key_b64:
-        raise RuntimeError("ENCRYPTION_KEY_BASE64 is not set. Please provide a base64-encoded 32-byte key.")
+        raise RuntimeError(
+            "ENCRYPTION_KEY_BASE64 is not set. Provide a base64-encoded 32-byte key via .env."
+        )
 
     try:
         key = base64.b64decode(key_b64)
@@ -72,7 +69,7 @@ def _load_context_from_env() -> CryptoContext:
         raise RuntimeError("ENCRYPTION_KEY_BASE64 must be valid base64") from e
 
     if len(key) != 32:
-        raise RuntimeError("ENCRYPTION_KEY_BASE64 must decode to 32 bytes for AES-256-GCM")
+        raise RuntimeError("ENCRYPTION_KEY_BASE64 must decode to exactly 32 bytes for AES-256-GCM")
 
     key_id = os.getenv("ENCRYPTION_KEY_ID")
     return CryptoContext(key=key, key_id=key_id)
@@ -97,15 +94,15 @@ def encrypt_json(payload: Union[Dict[str, Any], BaseModel]) -> str:
     """
     Encrypt a JSON-serializable payload using AES-256-GCM and return an envelope JSON string.
 
-    The function:
-    - Loads key and optional key_id from environment variables
-    - Serializes the payload to bytes (UTF-8 JSON)
-    - Generates a random 12-byte nonce
-    - Encrypts using AESGCM without AAD
-    - Returns a JSON string containing kid, alg, nonce, ciphertext (all safe for storage)
+    Steps:
+    - Load key and optional key_id from environment variables
+    - Serialize payload to compact JSON UTF-8 bytes
+    - Generate random 12-byte nonce
+    - Encrypt using AESGCM (no AAD)
+    - Return a JSON string containing kid, alg, nonce, ciphertext
 
     Parameters:
-        payload: Dict or Pydantic model to be encrypted
+        payload: Dict or Pydantic BaseModel to be encrypted
 
     Returns:
         str: JSON string of CipherEnvelope
@@ -113,10 +110,7 @@ def encrypt_json(payload: Union[Dict[str, Any], BaseModel]) -> str:
     ctx = _load_context_from_env()
     aesgcm = _get_aesgcm(ctx)
 
-    if isinstance(payload, BaseModel):
-        data = payload.model_dump()
-    else:
-        data = payload
+    data = payload.model_dump() if isinstance(payload, BaseModel) else payload
     plaintext = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
     nonce = _random_nonce()

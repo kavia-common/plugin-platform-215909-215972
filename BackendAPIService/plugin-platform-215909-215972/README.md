@@ -9,6 +9,7 @@ FastAPI backend scaffolded with:
 - Structured logging (JSON by default)
 - Global error envelope and exception handling
 - Security dependency with development JWT stub
+- Repository DI for connections (routers depend on get_connections_repo)
 - Base routers mounted (health, connectors, connections, tools)
 - OpenAPI metadata and tags
 
@@ -55,16 +56,36 @@ BACKEND_MONGO_URL=
 BACKEND_MONGO_DB=
 
 # Crypto (AES-256-GCM). Required for encrypt/decrypt helpers in src/api/crypto.py
-# 32-byte key base64-encoded. Example only; generate your own securely:
+# 32-byte key base64-encoded. Generate securely (example command below creates a random key):
 # python - <<'PY'
 # import os, base64; print(base64.b64encode(os.urandom(32)).decode())
 # PY
 ENCRYPTION_KEY_BASE64=
-# Optional key id to support rotation
+# Optional key id to support rotation; included in ciphertext envelope as "kid"
 ENCRYPTION_KEY_ID=
 ```
 
 Note: Nested envs use the `BACKEND_` prefix and `__` delimiter (pydantic-settings).
+
+### Crypto helpers
+
+- AES-256-GCM helpers live in `src/api/crypto.py`
+- Public functions:
+  - encrypt_json(payload: dict|BaseModel) -> str  (returns JSON envelope)
+  - decrypt_json(envelope_json: str) -> dict
+- Cipher envelope: `{"kid": "...", "alg": "AES-256-GCM", "nonce": "<b64>", "ciphertext": "<b64>"}`
+
+Usage example:
+
+```python
+from src.api.crypto import encrypt_json, decrypt_json
+
+secret = {"access_token": "redacted", "refresh_token": "redacted"}
+enveloped = encrypt_json(secret)
+original = decrypt_json(enveloped)
+```
+
+Ensure `ENCRYPTION_KEY_BASE64` is set to a base64-encoded 32-byte key; optionally set `ENCRYPTION_KEY_ID` to annotate envelopes for key rotation.
 
 ### API
 
@@ -74,12 +95,12 @@ Note: Nested envs use the `BACKEND_` prefix and `__` delimiter (pydantic-setting
 Key routes:
 - GET / -> health
 - GET /connectors -> requires Authorization in bootstrap mode
-- GET /connections -> requires Authorization
+- GET /connections -> requires Authorization (uses repo DI)
 - POST /tools/{toolName}/actions -> requires Authorization
 
 ### Hardening todo
 
 - Replace dev JWT stub with real JWT validation (JWKS, issuer/audience)
-- Add persistence layer and repositories
+- Add persistent storage backend (e.g., Mongo) for repositories
 - Add connector registry and tool dispatch
-- Implement OAuth flows and token storage
+- Implement OAuth flows and token storage (encrypt credentials with AES-GCM)

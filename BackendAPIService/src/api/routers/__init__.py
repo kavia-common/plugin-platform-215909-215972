@@ -3,8 +3,9 @@ Base routers for the Backend API Service.
 
 This module defines the root API router, a health router, and placeholders for
 future domain routers (connectors, connections, tools). The connections router
-uses a DI-provided in-memory ConnectionsRepository (via get_connections_repo),
-which can later be swapped for a persistent backend transparently.
+uses a DI-provided ConnectionsRepository (via get_connections_repo). The concrete
+implementation defaults to in-memory, and can be swapped to a persistent backend
+via the repository provider without changing router code.
 """
 from __future__ import annotations
 
