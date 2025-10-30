@@ -1,6 +1,6 @@
 # plugin-platform-215909-215972
 
-This project contains multiple containers. This README highlights BackendAPIService bootstrap status.
+This project contains multiple containers. This README highlights BackendAPIService bootstrap status and how to run it locally.
 
 ## BackendAPIService
 
@@ -8,28 +8,47 @@ FastAPI backend scaffolded with:
 - Typed configuration via pydantic-settings
 - Structured logging (JSON by default)
 - Global error envelope and exception handling
-- Security dependency with development JWT stub
+- Security dependency with development JWT stub (Bearer token)
 - Repository DI for connections (routers depend on get_connections_repo)
 - Base routers mounted (health, connectors, connections, tools)
-- OpenAPI metadata and tags
+- OpenAPI metadata and tags with BearerAuth security scheme
+
+### Ports
+
+- Default: 8000 (configurable via process manager or deployment tooling)
+- Examples:
+  - API root (health): http://localhost:8000/
+  - Docs (Swagger UI): http://localhost:8000/docs
+  - OpenAPI JSON: http://localhost:8000/openapi.json
 
 ### Run locally
 
-1) Ensure environment variables are provided by orchestrator (.env). You may use a `.env.example` guide below.
+1) Ensure environment variables are provided by orchestrator (.env). You may use the `.env.example` guide below.
 
 2) Install dependencies:
    pip install -r BackendAPIService/requirements.txt
 
-3) Start the server:
+3) Start the server from repository root:
    uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000 --app-dir BackendAPIService
 
 4) Test health:
    curl http://localhost:8000/
 
-### Auth (bootstrap)
+5) Test with dev token (bootstrap):
+   curl -H "Authorization: Bearer dev-token" http://localhost:8000/connectors
 
-- Development mode is enabled by default. Provide `Authorization: Bearer dev-token` to access protected routes.
-- This is controlled by env vars (see below). Do NOT use in production.
+### Authentication and Security
+
+- BearerAuth security is defined in OpenAPI. In development mode, a static dev token is accepted:
+  - Authorization: Bearer dev-token (configurable with BACKEND_SECURITY__DEV_JWT)
+- Production should disable dev mode and configure real JWT validation (JWKS + issuer/audience).
+- Security environment variables:
+  - BACKEND_SECURITY__DEV_MODE=true|false
+  - BACKEND_SECURITY__DEV_JWT=dev-token
+  - BACKEND_SECURITY__JWT_ISSUER=https://issuer.example.com/
+  - BACKEND_SECURITY__JWT_AUDIENCE=your-audience
+  - BACKEND_SECURITY__JWKS_URL=https://issuer.example.com/.well-known/jwks.json
+- CORS: configure allowed origins with BACKEND_CORS__ALLOW_ORIGINS (comma- or space-separated list supported by pydantic list parsing depending on env loader).
 
 ### Environment variables
 
@@ -44,14 +63,16 @@ BACKEND_LOGGING__SERVICE_NAME=backend-api
 # CORS
 BACKEND_CORS__ALLOW_ORIGINS=*
 
-# Security (bootstrap)
+# Security (bootstrap/dev) - use dev token locally, disable in production
 BACKEND_SECURITY__DEV_MODE=true
 BACKEND_SECURITY__DEV_JWT=dev-token
+
+# JWT verification settings (for production hardening)
 BACKEND_SECURITY__JWT_AUDIENCE=
 BACKEND_SECURITY__JWT_ISSUER=
 BACKEND_SECURITY__JWKS_URL=
 
-# Database (placeholders)
+# Database (placeholders for future persistence)
 BACKEND_MONGO_URL=
 BACKEND_MONGO_DB=
 
@@ -65,13 +86,15 @@ ENCRYPTION_KEY_BASE64=
 ENCRYPTION_KEY_ID=
 ```
 
-Note: Nested envs use the `BACKEND_` prefix and `__` delimiter (pydantic-settings).
+Notes:
+- Nested envs use the `BACKEND_` prefix and `__` delimiter (pydantic-settings).
+- ENCRYPTION_KEY_BASE64 must decode to exactly 32 bytes (256-bit).
 
 ### Crypto helpers
 
-- AES-256-GCM helpers live in `src/api/crypto.py`
+- AES-256-GCM helpers live in `BackendAPIService/src/api/crypto.py`
 - Public functions:
-  - encrypt_json(payload: dict|BaseModel) -> str  (returns JSON envelope)
+  - encrypt_json(payload: dict|BaseModel) -> str  (returns JSON envelope string)
   - decrypt_json(envelope_json: str) -> dict
 - Cipher envelope: `{"kid": "...", "alg": "AES-256-GCM", "nonce": "<b64>", "ciphertext": "<b64>"}`
 
@@ -87,26 +110,31 @@ original = decrypt_json(enveloped)
 
 Ensure `ENCRYPTION_KEY_BASE64` is set to a base64-encoded 32-byte key; optionally set `ENCRYPTION_KEY_ID` to annotate envelopes for key rotation.
 
-### API
+### API Overview
 
 - OpenAPI JSON: GET /openapi.json
 - Docs: /docs
 
-Key routes:
+Key routes (all protected with BearerAuth except health):
 - GET / -> health
-- GET /connectors -> requires Authorization in bootstrap mode
-- POST /connectors/{id}/oauth/login -> mock/real OAuth authorize URL
+- GET /ws-help -> websocket usage help (static)
+- GET /connectors -> list available connectors
+- POST /connectors/{id}/oauth/login -> mock/real OAuth authorize URL (PKCE supported)
 - GET /connectors/{id}/oauth/callback -> mock/real callback and connection creation
 - GET /connectors/{id}/search?q=... -> normalized search (mocked unless real creds)
-- GET /connections -> requires Authorization (uses repo DI)
-- POST /connections -> create connection; if body.credentials.plain is provided, it will be encrypted as credentials.cipher using AES-GCM
+- GET /connectors/{id}/projects -> normalized projects (jira mock)
+- GET /connectors/{id}/spaces -> normalized spaces (confluence mock)
+- POST /connectors/{id}/issues -> normalized create issue (jira mock)
+- POST /connectors/{id}/pages -> normalized create page (confluence mock)
+- GET /connections -> list connections (tenant-scoped)
+- POST /connections -> create connection; if body.credentials.plain provided, it will be encrypted as credentials.cipher using AES-GCM (fallback to mock)
 - GET /connections/{connectionId} -> fetch a specific connection
 - DELETE /connections/{connectionId} -> delete connection
-- POST /tools/{toolName}/actions -> requires Authorization
+- POST /tools/{toolName}/actions -> tool action stub
 
-### Hardening todo
+### Hardening TODO
 
-- Replace dev JWT stub with real JWT validation (JWKS, issuer/audience)
+- Replace dev JWT stub with real JWT validation (JWKS, issuer/audience checks)
 - Add persistent storage backend (e.g., Mongo) for repositories
-- Add connector registry and tool dispatch
-- Implement OAuth flows and token storage (encrypt credentials with AES-GCM)
+- Add connector registry and tool dispatch implementations
+- Implement real OAuth code exchange and token storage (encrypt credentials with AES-GCM)
